@@ -1,0 +1,60 @@
+### ========================================
+### HydraProxy Iteration 2 — 最简版本测试
+### 纯文本，无流式，无 tools
+### 运行: OPENAI_API_KEY=sk-xxx npx tsx proxy.ts
+### ========================================
+
+@host = http://localhost:3456
+
+### ─── 基本测试 (来自 proxy.ts 注释的 curl) ───
+
+POST {{host}}/v1/messages HTTP/1.1
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "system": "You are helpful.",
+  "messages": [
+    { "role": "user", "content": "Say hi" }
+  ],
+  "max_tokens": 100,
+  "stream": false
+}
+
+### ─── 多轮对话 ───
+
+POST {{host}}/v1/messages HTTP/1.1
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "messages": [
+    { "role": "user", "content": "What is 2+2?" },
+    { "role": "assistant", "content": "4" },
+    { "role": "user", "content": "Multiply that by 10." }
+  ],
+  "max_tokens": 100,
+  "stream": false
+}
+
+### ─── System prompt (array 格式) ───
+
+POST {{host}}/v1/messages HTTP/1.1
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "system": [
+    { "type": "text", "text": "You are a helpful assistant." },
+    { "type": "text", "text": "Reply in Chinese." }
+  ],
+  "messages": [
+    { "role": "user", "content": "What is TypeScript?" }
+  ],
+  "max_tokens": 200,
+  "stream": false
+}
+
+### ─── 404 (不支持的路径) ───
+
+GET {{host}}/v1/messages HTTP/1.1
