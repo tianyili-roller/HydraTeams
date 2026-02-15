@@ -49,7 +49,15 @@ const server = http.createServer(async (req, res) => {
       const text =
         typeof body.system === "string"
           ? body.system
-          : body.system.map((b: { text: string }) => b.text).join("\n");
+          : body.system
+              .map(
+                (b: {
+                  type: "text";
+                  text: string;
+                  cache_control?: { type: string };
+                }) => b.text,
+              )
+              .join("\n");
       openaiMessages.push({ role: "system", content: text });
     }
 
