@@ -393,7 +393,55 @@ Invalid Hey API shorthand format. Expected "organization/project"
 
 Setting `requests: false` and `responses: false` avoids generating per-endpoint wrapper schemas. The `definitions` flag generates schemas for `#/components/schemas`, which is where the reusable types live. This keeps the output focused on what HydraTeams actually needs.
 
-### 4. Generated Types vs Hand-Written Types
+### 4. `safeParse().data` Injects Defaults — Don't Send It Upstream
+
+**This one bit us in production.** The OpenAI spec defines `default` values on many optional fields:
+
+```yaml
+# In the OpenAI OpenAPI spec:
+temperature:        { default: 1 }
+frequency_penalty:  { default: 0 }
+n:                  { default: 1 }
+parallel_tool_calls: { default: true }
+store:              { default: false }
+```
+
+`@hey-api/openapi-ts` generates these as `z.number().default(1)`, etc. When Zod's `safeParse()` runs, `.default()` **fills in every missing field** — so an input with 4 fields becomes output with 15+:
+
+```typescript
+const input = { model: 'gpt-4o-mini', messages: [...], max_tokens: 100, stream: false };
+const result = zCreateChatCompletionRequest.safeParse(input);
+
+// result.data now has: temperature: 1, n: 1, parallel_tool_calls: true,
+// frequency_penalty: 0, presence_penalty: 0, store: false, ...
+```
+
+**The `parallel_tool_calls: true` default causes an OpenAI API error** when no `tools` are present:
+```json
+{
+  "error": {
+    "message": "Invalid value for 'parallel_tool_calls': only allowed when 'tools' are specified.",
+    "type": "invalid_request_error"
+  }
+}
+```
+
+**Fix for proxy use:** validate with `safeParse()` but send the **original data**, not `parsed.data`:
+
+```typescript
+const parsed = zCreateChatCompletionRequest.safeParse(openaiReqBody);
+if (!parsed.success) { /* reject */ }
+
+// ✗ DON'T send parsed.data — it has injected defaults
+body: JSON.stringify(parsed.data)
+
+// ✓ DO send the original — only what the caller actually set
+body: JSON.stringify(openaiReqBody)
+```
+
+This gives you the validation guarantee (shape is correct) without the field inflation. The upstream API applies its own server-side defaults for anything omitted.
+
+### 5. Generated Types vs Hand-Written Types
 
 ```
 src/translators/types.ts          ← hand-written, used by proxy.ts today
