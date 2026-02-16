@@ -159,6 +159,55 @@ The `specs:download` script (`scripts/download-specs.sh`) dynamically resolves t
 
 The `schemas:generate` script has a post-processing step that prepends `// @ts-nocheck` to the OpenAI `zod.gen.ts` file only (Anthropic compiles clean). More on why in the [Gotchas](#gotcha-ts-nocheck) section.
 
+### `openapi-ts` CLI Reference
+
+`@hey-api/openapi-ts` installs a binary called `openapi-ts` into `node_modules/.bin/`. This is the same mechanism used by `tsc`, `vitest`, `tsx`, etc. — npm scripts automatically resolve binaries from `node_modules/.bin/`, so `"schemas:generate": "openapi-ts"` just works. You can also run it directly via `npx openapi-ts`.
+
+**Two ways to use it:**
+
+**1. Config file (recommended, what we use):**
+```bash
+openapi-ts                     # auto-discovers openapi-ts.config.ts
+openapi-ts -f my-config.ts     # custom config path
+```
+
+When run with no args, it searches the project root for config files in this order:
+`openapi-ts.config.ts` → `.cjs` → `.mjs` → `.js`
+
+**2. Inline CLI flags (handy for one-off runs):**
+```bash
+npx openapi-ts \
+  -i ./specs/anthropic.yml \
+  -o ./src/schemas/generated/anthropic \
+  -p @hey-api/typescript zod
+```
+
+**Full CLI flags:**
+
+```
+┌────────────────────────┬──────────────────────────────────────────────────────┐
+│ Flag                   │ Meaning                                              │
+├────────────────────────┼──────────────────────────────────────────────────────┤
+│ -i, --input <path...>  │ OpenAPI spec location (file path, URL, or Hey API   │
+│                        │ registry shorthand like "org/project")               │
+│ -o, --output <path...> │ Output folder for generated files                    │
+│ -p, --plugins [names]  │ Space-separated plugin names                         │
+│                        │ e.g. -p @hey-api/typescript zod                      │
+│ -c, --client <name>    │ HTTP client to generate (e.g. @hey-api/client-fetch) │
+│ -f, --file <path>      │ Path to config file (overrides auto-discovery)       │
+│ -w, --watch [interval] │ Watch mode — regenerate when input file changes      │
+│ -d, --debug            │ Enable debug logging                                 │
+│ -s, --silent           │ Suppress all output                                  │
+│ -l, --logs <path>      │ Custom logs folder path                              │
+│ --no-log-file          │ Disable log file output                              │
+│ --dry-run              │ Parse and validate, but skip writing files            │
+│ -V, --version          │ Print version number                                 │
+│ -h, --help             │ Show help                                            │
+└────────────────────────┴──────────────────────────────────────────────────────┘
+```
+
+We use the config file approach because we have two jobs (Anthropic + OpenAI) with per-plugin options (`definitions: true`, `requests: false`, etc.) — that would be unwieldy as CLI args. The config file also gives full TypeScript type safety via `defineConfig()`.
+
 ### Step 5: Create `openapi-ts.config.ts`
 
 ```typescript
