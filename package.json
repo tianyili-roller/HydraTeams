@@ -12,7 +12,7 @@
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "specs:download": "bash scripts/download-specs.sh",
-    "schemas:generate": "openapi-ts && node -e \"const fs=require('fs'); for(const f of fs.globSync('src/schemas/generated/**/zod.gen.ts')){const c=fs.readFileSync(f,'utf8'); if(!c.startsWith('// @ts-nocheck')) fs.writeFileSync(f,'// @ts-nocheck\\n'+c)}\"",
+    "schemas:generate": "openapi-ts && node -e \"const f='src/schemas/generated/openai/zod.gen.ts',fs=require('fs'),c=fs.readFileSync(f,'utf8'); if(!c.startsWith('// @ts-nocheck')) fs.writeFileSync(f,'// @ts-nocheck\\n'+c)\"",
     "schemas:update": "npm run specs:download && npm run schemas:generate",
     "test": "vitest run",
     "test:watch": "vitest"

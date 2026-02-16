@@ -59,7 +59,7 @@ flowchart LR
         C["@hey-api/openapi-ts\nv0.92.4"]
         D1["src/schemas/generated/openai/\n• types.gen.ts\n• zod.gen.ts"]
         D2["src/schemas/generated/anthropic/\n• types.gen.ts\n• zod.gen.ts"]
-        E["Post-process:\nadd // @ts-nocheck\nto zod.gen.ts files"]
+        E["Post-process:\nadd // @ts-nocheck\nto OpenAI zod.gen.ts"]
     end
 
     subgraph "Hand-curated"
@@ -92,7 +92,7 @@ npm run schemas:update
               │      ├── Job 1: anthropic.yml → src/schemas/generated/anthropic/
               │      └── Job 2: openai.yaml   → src/schemas/generated/openai/
               │
-              └── node post-process: prepend // @ts-nocheck to zod.gen.ts files
+              └── node post-process: prepend // @ts-nocheck to OpenAI zod.gen.ts only
 ```
 
 ---
@@ -157,7 +157,7 @@ src/schemas/gen/**   NO             avoids forcing codegen before build
 
 The `specs:download` script (`scripts/download-specs.sh`) dynamically resolves the Anthropic spec URL by fetching `.stats.yml` from the official SDK repo — so it always gets the latest version.
 
-The `schemas:generate` script has a post-processing step that prepends `// @ts-nocheck` to every `zod.gen.ts` file. More on why in the [Gotchas](#gotcha-ts-nocheck) section.
+The `schemas:generate` script has a post-processing step that prepends `// @ts-nocheck` to the OpenAI `zod.gen.ts` file only (Anthropic compiles clean). More on why in the [Gotchas](#gotcha-ts-nocheck) section.
 
 ### Step 5: Create `openapi-ts.config.ts`
 
@@ -308,9 +308,11 @@ npm test
 
 ## Gotchas & Lessons Learned
 
-### <a name="gotcha-ts-nocheck"></a>1. `// @ts-nocheck` on Generated Files
+### <a name="gotcha-ts-nocheck"></a>1. `// @ts-nocheck` on OpenAI's Generated File
 
-The OpenAI spec has several fields with `default: null` on non-nullable schemas. This produces code like:
+**Only the OpenAI spec** triggers TypeScript errors (4 of them). The Anthropic (Stainless-hosted) spec compiles clean.
+
+**Root cause:** The OpenAI OpenAPI spec declares `default: null` on fields whose schema type is a non-nullable object or array. When `@hey-api/openapi-ts` generates Zod code, it faithfully emits `.default(null)` — but Zod's `.default()` requires the default value to match the schema type. Since `null` isn't assignable to an object type, TypeScript rejects it.
 
 ```typescript
 // Generated — .default(null) on a Zod object type
@@ -319,7 +321,9 @@ z.object({ type: z.optional(z.enum(['near_field', 'far_field'])) }).default(null
 //  TS2769: Argument of type 'null' is not assignable to parameter of type '{ ... }'
 ```
 
-This is a known upstream issue in the codegen tool. Since we never edit generated files, `// @ts-nocheck` is the pragmatic fix. It's applied automatically in the `schemas:generate` script as a post-processing step.
+The 4 occurrences are all in the Realtime API section of the OpenAI spec (audio `turn_detection` fields and eval `testing_criteria`). This is an upstream spec bug — the fields should declare `nullable: true` or use `oneOf: [schema, {type: null}]` alongside the default.
+
+Since we never edit generated files, `// @ts-nocheck` on OpenAI's `zod.gen.ts` is the pragmatic fix. It's applied automatically by the `schemas:generate` post-processing step. The Anthropic file is left untouched — full type checking applies there.
 
 ### 2. Local Paths Need `./` Prefix
 
@@ -422,7 +426,7 @@ git diff src/schemas/generated/
 | Curated barrel over wildcard re-export | OpenAI has 284 schemas; only ~17 are relevant to HydraTeams |
 | `zod` as devDep (not regular dep) | No runtime usage yet; moves to regular dep when proxy uses `safeParse` |
 | `vitest` for testing | Zero-config ESM + TypeScript, fast startup (272ms for 24 tests) |
-| `// @ts-nocheck` post-processing | Upstream codegen bug with `.default(null)` — pragmatic fix for generated code |
+| `// @ts-nocheck` on OpenAI only | OpenAI spec has `default: null` on non-nullable fields (Realtime API); Anthropic spec compiles clean |
 | Existing `types.ts` kept as-is | Generated schemas supplement, not replace — migration is a separate step |
 | Stainless-hosted spec over `laszukdawid` community spec | 360 schemas vs 113, updated Feb 2026 vs Nov 2024, same spec that generates official Anthropic SDKs |
 | Dynamic URL resolution via `.stats.yml` | Spec URL contains a content hash that changes per revision; hardcoding would go stale |
