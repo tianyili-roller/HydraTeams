@@ -3,3 +3,7 @@ dist/
 *.js.map
 .env
 *.tgz
+
+# Downloaded OpenAPI specs (re-downloadable via `npm run specs:download`)
+specs/*
+!specs/README.md
