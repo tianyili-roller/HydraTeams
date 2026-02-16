@@ -102,6 +102,10 @@ const server = http.createServer(async (req, res) => {
     };
 
     // ── 2b. 校验翻译后的 OpenAI 请求 ──
+    // NOTE: safeParse validates structure but .data includes Zod-applied defaults
+    // (e.g. parallel_tool_calls: true, temperature: 1, n: 1). Sending .data would
+    // inject fields the caller never set — and some cause errors (parallel_tool_calls
+    // without tools). So we validate only, then send the original object.
     const openaiReqParsed =
       zCreateChatCompletionRequest.safeParse(openaiReqBody);
     if (!openaiReqParsed.success) {
@@ -127,13 +131,14 @@ const server = http.createServer(async (req, res) => {
     );
 
     // ── 3. 发给 OpenAI ──
+    // Send original openaiReqBody, NOT openaiReqParsed.data (see note above)
     const upstream = await fetch(OPENAI_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
-      body: JSON.stringify(openaiReqParsed.data),
+      body: JSON.stringify(openaiReqBody),
     });
 
     if (!upstream.ok) {
