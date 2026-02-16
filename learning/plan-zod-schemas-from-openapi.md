@@ -1,5 +1,9 @@
 # Plan: Auto-Generate Zod Schemas from OpenAPI Specs
 
+> **Status: Implemented.** See [`iteration-zod-schemas.md`](./iteration-zod-schemas.md) for the full write-up.
+> The Anthropic spec source was upgraded from the stale `laszukdawid` community spec to the
+> Stainless-hosted spec (same one that generates official Anthropic SDKs).
+
 ## Context
 
 HydraTeams is a translation proxy between Anthropic and OpenAI API formats. The project currently uses hand-written TypeScript interfaces (`src/translators/types.ts`) with **no runtime validation**. Zod is installed (`4.3.6`, devDep) but unused. The user wants to generate Zod schemas from official OpenAPI specs so that runtime type checking (e.g. `safeParse`) can be used in tests and shared across modules.
