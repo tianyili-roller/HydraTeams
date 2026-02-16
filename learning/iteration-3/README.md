@@ -164,9 +164,67 @@ while (true) {
 }
 ```
 
-**为什么需要 buffer？** 因为 `reader.read()` 返回的字节不一定对齐到行边界。
+**为什么需要 buffer？** 因为 `reader.read()` 返回的字节是按**网络包**切分的，不是按**行**切分的。
 一个 SSE data 行可能被拆成两个 read() 调用返回。所以我们需要一个 buffer 来累积，
 只处理完整的行（以 `\n` 结尾的），不完整的留到下一次。
+
+#### 具体示例：没有 buffer 会怎样？
+
+假设 OpenAI 要发送这两个 SSE 事件：
+
+```
+data: {"choices":[{"delta":{"content":"Hello"}}]}\n
+\n
+data: {"choices":[{"delta":{"content":" world"}}]}\n
+\n
+```
+
+但网络层可能这样拆包——在 JSON 中间截断：
+
+```
+// 第 1 次 read() 返回：
+'data: {"choices":[{"delta":{"content":"He'
+
+// 第 2 次 read() 返回：
+'llo"}}]}\n\ndata: {"choices":[{"delta":{"content":" world"}}]}\n\n'
+```
+
+第一次 read 的内容在 `"He` 处被截断了——JSON 不完整，直接 `JSON.parse` 会报错。
+
+#### 有 buffer 的逐步模拟
+
+```
+── 第 1 次 read() ──
+value = 'data: {"choices":[{"delta":{"content":"He'
+
+buffer += value
+buffer = 'data: {"choices":[{"delta":{"content":"He'
+
+split("\n") → ['data: {"choices":[{"delta":{"content":"He']
+               只有 1 段，pop() 后全部留在 buffer
+lines  = []        ← 没有完整行，什么都不处理
+buffer = 'data: {"choices":[{"delta":{"content":"He'   ← 等下一次 read 补全
+
+
+── 第 2 次 read() ──
+value = 'llo"}}]}\n\ndata: {"choices":[...}]}\n\n'
+
+buffer += value
+buffer = 'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\ndata: {"choices":[...}]}\n\n'
+
+split("\n") → [
+  'data: {"choices":[{"delta":{"content":"Hello"}}]}',   ← ✅ 完整！上次的残片拼上了
+  '',                                                     ← 空行（SSE 事件分隔符）
+  'data: {"choices":[{"delta":{"content":" world"}}]}',   ← ✅ 完整
+  '',                                                     ← 空行
+  ''                                                      ← 尾部空串
+]
+
+pop() → buffer = ''    ← 这次刚好对齐，没有残片
+lines  = [完整行, 空行, 完整行, 空行]   ← 全部可以安全 JSON.parse
+```
+
+核心思路就一句话：**`split("\n")` 之后，`pop()` 掉最后一段（可能不完整），剩下的都是以 `\n` 结尾的完整行，可以安全解析。**
 
 ### Step 3: 翻译每个 chunk
 
