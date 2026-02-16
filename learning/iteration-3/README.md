@@ -28,8 +28,10 @@ data: 数据内容\n
 规则：
 - 每行以 `event:`, `data:`, `id:`, 或 `retry:` 开头
 - `event:` 行是可选的（OpenAI 不用，Anthropic 用）
-- 一个空行 `\n` 表示当前事件结束
+- 一个空行 `\n\n` 表示当前事件结束（这是 [W3C SSE 规范](https://html.spec.whatwg.org/multipage/server-sent-events.html) 定义的，不只是惯例）
 - `data:` 后面通常是 JSON 字符串
+
+**为什么用 `\n\n` 而不是 `\n` 做分隔符？** 因为单个 `\n` 在数据内容里太常见了，用空行（连续两个换行）可以让数据行内部自由使用换行，同时保持协议易解析。这是文本协议中的常见模式——HTTP 用 `\r\n\r\n` 分隔 headers 和 body，SMTP 用 `\r\n\r\n` 分隔邮件头和正文，Markdown 用 `\n\n` 分隔段落。
 
 ### OpenAI 的 SSE：只有 `data:` 行
 
