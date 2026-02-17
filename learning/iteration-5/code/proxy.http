@@ -1,0 +1,422 @@
+### ═══════════════════════════════════════════════════════════════
+### HydraProxy Iteration 5 — 消息历史翻译测试
+###
+### 本 iteration 的核心变更是消息翻译，所以测试重点是
+### 多轮对话中 tool_use / tool_result 的正确传递。
+### ═══════════════════════════════════════════════════════════════
+
+
+### ─── Test 1: 单轮 tool_use + tool_result ─────────────────────
+### 模拟：GPT 上一轮调用了 Read，Claude Code 执行后把结果送回来
+### 验证：GPT 能看到 tool result 并基于它回答
+### 期望：GPT 应该输出关于 "print('hello world')" 的分析
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "stream": true,
+  "system": "You are a coding assistant. Be concise.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Read /tmp/hello.py and explain what it does"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        { "type": "text", "text": "Let me read that file." },
+        {
+          "type": "tool_use",
+          "id": "toolu_read_001",
+          "name": "Read",
+          "input": { "file_path": "/tmp/hello.py" }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_read_001",
+          "content": "     1\tprint('hello world')\n     2\tprint('goodbye world')"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": { "type": "string" }
+        },
+        "required": ["file_path"]
+      }
+    }
+  ]
+}
+
+
+### ─── Test 2: 并行 tool_use + 多个 tool_result ───────────────
+### 模拟：GPT 上一轮并行调用了 2 个 Read，两个结果一起返回
+### 验证：两个 tool_result 被正确拆成两条 role:"tool" 消息
+### 期望：GPT 应该能对比两个文件的内容
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 2048,
+  "stream": true,
+  "system": "You are a coding assistant. Compare the two files briefly.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Compare /tmp/a.py and /tmp/b.py"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        { "type": "text", "text": "I'll read both files." },
+        {
+          "type": "tool_use",
+          "id": "toolu_read_a",
+          "name": "Read",
+          "input": { "file_path": "/tmp/a.py" }
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_read_b",
+          "name": "Read",
+          "input": { "file_path": "/tmp/b.py" }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_read_a",
+          "content": "def greet():\n    return 'hello'"
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_read_b",
+          "content": "def greet():\n    return 'hi there'"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "file_path": { "type": "string" } },
+        "required": ["file_path"]
+      }
+    }
+  ]
+}
+
+
+### ─── Test 3: tool_result + text 混合的 user 消息 ──────────────
+### 模拟：工具结果返回的同时，用户追加了新指令
+### 验证：tool_result → role:"tool"，text → role:"user"，拆成两条消息
+### 期望：GPT 应该基于文件内容执行 "add type hints" 的指令
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 2048,
+  "stream": true,
+  "system": "You are a coding assistant.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Read /tmp/utils.py"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_read_utils",
+          "name": "Read",
+          "input": { "file_path": "/tmp/utils.py" }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_read_utils",
+          "content": "def add(a, b):\n    return a + b\n\ndef multiply(a, b):\n    return a * b"
+        },
+        {
+          "type": "text",
+          "text": "Now add type hints to all functions in this file."
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "file_path": { "type": "string" } },
+        "required": ["file_path"]
+      }
+    },
+    {
+      "name": "Edit",
+      "description": "Performs exact string replacements in files.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": { "type": "string" },
+          "old_string": { "type": "string" },
+          "new_string": { "type": "string" }
+        },
+        "required": ["file_path", "old_string", "new_string"]
+      }
+    }
+  ]
+}
+
+
+### ─── Test 4: 多轮 agent loop（3 轮工具调用）───────────────────
+### 模拟完整的 3 轮 agent loop：
+###   Turn 1: user 提问
+###   Turn 2: GPT 调 Bash
+###   Turn 3: tool_result (ls 输出)
+###   Turn 4: GPT 调 Read
+###   Turn 5: tool_result (文件内容)
+###   Turn 6: GPT 调 Read (另一个文件)
+###   Turn 7: tool_result (文件内容)
+###   → GPT 的第 4 次回复
+### 验证：长历史中的所有 tool_use/tool_result 都被正确翻译
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 2048,
+  "stream": true,
+  "system": "You are a coding assistant. Be very concise.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What files are in /tmp/project/ and summarize the main ones?"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        { "type": "text", "text": "Let me check." },
+        {
+          "type": "tool_use",
+          "id": "toolu_bash_001",
+          "name": "Bash",
+          "input": { "command": "ls /tmp/project/" }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_bash_001",
+          "content": "index.ts\npackage.json\nREADME.md"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        { "type": "text", "text": "I see 3 files. Let me read the main ones." },
+        {
+          "type": "tool_use",
+          "id": "toolu_read_001",
+          "name": "Read",
+          "input": { "file_path": "/tmp/project/index.ts" }
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_read_002",
+          "name": "Read",
+          "input": { "file_path": "/tmp/project/package.json" }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_read_001",
+          "content": "console.log('hello from project');"
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_read_002",
+          "content": "{\"name\": \"my-project\", \"version\": \"1.0.0\"}"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "Bash",
+      "description": "Executes a bash command.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "command": { "type": "string" } },
+        "required": ["command"]
+      }
+    },
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "file_path": { "type": "string" } },
+        "required": ["file_path"]
+      }
+    }
+  ]
+}
+
+
+### ─── Test 5: assistant 纯 tool_use (无 text) ─────────────────
+### 模拟：GPT 上一轮直接调用工具，没有说任何文字
+### 验证：assistant message 的 content 被设为 null
+### 这在 Claude Code 中很常见 — agent 经常不说话就直接调工具
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "stream": true,
+  "system": "You are a coding assistant.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Show me /etc/hostname"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_read_host",
+          "name": "Read",
+          "input": { "file_path": "/etc/hostname" }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_read_host",
+          "content": "my-macbook.local"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "file_path": { "type": "string" } },
+        "required": ["file_path"]
+      }
+    }
+  ]
+}
+
+
+### ─── Test 6: error tool_result ────────────────────────────────
+### 模拟：工具执行失败（文件不存在）
+### 验证：is_error 的 tool_result 也能正确传递
+### 期望：GPT 应该识别到错误并给出替代方案
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "stream": true,
+  "system": "You are a coding assistant. When a tool fails, suggest an alternative.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Read /tmp/nonexistent.py"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_read_fail",
+          "name": "Read",
+          "input": { "file_path": "/tmp/nonexistent.py" }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_read_fail",
+          "content": "Error: ENOENT: no such file or directory, open '/tmp/nonexistent.py'",
+          "is_error": true
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "file_path": { "type": "string" } },
+        "required": ["file_path"]
+      }
+    },
+    {
+      "name": "Bash",
+      "description": "Executes a bash command.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "command": { "type": "string" } },
+        "required": ["command"]
+      }
+    }
+  ]
+}
