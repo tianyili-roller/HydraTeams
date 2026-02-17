@@ -19,8 +19,9 @@ Content-Type: application/json
 
 {
   "model": "claude-sonnet-4-5-20250929",
+  "system": "You are a coding assistant. Be concise.",
   "messages": [
-    { "role": "user", "content": "This is a test message that should result in approximately 15-20 tokens" }
+    { "role": "user", "content": "This is a test message that should result in approximately ~30 tokens" }
   ]
 }
 

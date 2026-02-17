@@ -518,8 +518,15 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     try {
       const parsed = JSON.parse(body);
-      // 用 tiktoken 精确计算 token 数
-      const text = JSON.stringify(parsed.messages || []);
+      if (!parsed.messages) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ input_tokens: 1000 }));
+        return;
+      }
+      // 用 tiktoken 精确计算 token 数（system + messages + tools）
+      const text = (parsed.system ? JSON.stringify(parsed.system) : "")
+        + JSON.stringify(parsed.messages)
+        + (parsed.tools ? JSON.stringify(parsed.tools) : "");
       const estimatedTokens = tokenEncoder.encode(text).length;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ input_tokens: Math.ceil(estimatedTokens) }));
