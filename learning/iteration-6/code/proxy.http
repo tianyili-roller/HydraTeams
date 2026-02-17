@@ -1,0 +1,131 @@
+### ═══════════════════════════════════════════════════════════════
+### HydraProxy Iteration 6 — Edge Cases 测试
+### ═══════════════════════════════════════════════════════════════
+
+
+### ─── Test 1: Health Check ────────────────────────────────────
+### 验证：GET / 返回 proxy 状态
+### 期望：{"status":"ok","targetModel":"gpt-5.2","spoofModel":"claude-sonnet-4-5-20250929"}
+
+GET http://localhost:3456/health
+
+
+### ─── Test 2: Count Tokens ───────────────────────────────────
+### 验证：/v1/messages/count_tokens 返回估算值
+### 期望：{"input_tokens": <some number>}
+
+POST http://localhost:3456/v1/messages/count_tokens
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "messages": [
+    { "role": "user", "content": "This is a test message that should result in approximately 15-20 tokens" }
+  ]
+}
+
+
+### ─── Test 3: Count Tokens (空 body) ─────────────────────────
+### 验证：畸形请求不会让 proxy 崩溃
+### 期望：{"input_tokens": 1000} (保守默认值)
+
+POST http://localhost:3456/v1/messages/count_tokens
+Content-Type: application/json
+
+{
+  "invalid": "body"
+}
+
+
+### ─── Test 4: Non-streaming — 纯文本 ─────────────────────────
+### 验证：stream: false 返回 JSON 而不是 SSE
+### 期望：完整的 Anthropic Message JSON
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 200,
+  "stream": false,
+  "system": "Reply in exactly 5 words.",
+  "messages": [
+    { "role": "user", "content": "What is your favorite color?" }
+  ]
+}
+
+
+### ─── Test 5: Non-streaming — tool call ──────────────────────
+### 验证：stream: false + tools，返回包含 tool_use block 的 JSON
+### 期望：content 数组中有 type: "tool_use" 的 block
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "stream": false,
+  "system": "You are a coding assistant. Use tools to answer.",
+  "messages": [
+    { "role": "user", "content": "Read /tmp/hello.py" }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": { "type": "string" }
+        },
+        "required": ["file_path"]
+      }
+    }
+  ],
+  "tool_choice": { "type": "any" }
+}
+
+
+### ─── Test 6: 404 路由 ──────────────────────────────────────
+### 验证：不存在的路由返回 Anthropic 格式的 404
+### 期望：{"error":{"type":"not_found","message":"Not found"}}
+
+POST http://localhost:3456/v1/unknown
+Content-Type: application/json
+
+{}
+
+
+### ─── Test 7: Streaming — 正常工具调用（回归测试）──────────────
+### 验证：加了健壮性机制后，正常的 streaming + tools 不受影响
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "stream": true,
+  "system": "You are helpful.",
+  "messages": [
+    { "role": "user", "content": "Count from 1 to 3" }
+  ]
+}
+
+
+### ─── Test 8: stream 字段缺失（默认为 streaming）────────────
+### 验证：没有显式设置 stream 字段时，默认走 streaming
+### 注意：生产版本的逻辑是 `stream !== false` — 缺失和 true 都走 streaming
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 200,
+  "system": "Reply briefly.",
+  "messages": [
+    { "role": "user", "content": "Hello" }
+  ]
+}
