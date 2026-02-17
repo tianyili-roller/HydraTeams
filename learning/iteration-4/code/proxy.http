@@ -1,0 +1,299 @@
+### ═══════════════════════════════════════════════════════════════
+### HydraProxy Iteration 4 — Tool Use 测试用例
+###
+### 使用方法:
+###   1. 启动 proxy: OPENAI_API_KEY=sk-xxx npx tsx proxy.ts
+###   2. 用 VS Code REST Client 插件 或 IntelliJ HTTP Client 打开此文件
+###   3. 点击 "Send Request" 运行每个测试
+###
+### 也可以用 curl: 把 JSON body 复制出来用 curl -N 发送
+### ═══════════════════════════════════════════════════════════════
+
+
+### ─── Test 1: 纯文本（无 tools）─────────────────────────────────
+### 验证：加了 tools 支持后，纯文本场景不受影响
+### 期望：收到 message_start → content_block_start(text) → deltas → stop
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 200,
+  "stream": true,
+  "system": "Reply in one short sentence.",
+  "messages": [
+    { "role": "user", "content": "What is 2+2?" }
+  ]
+}
+
+
+### ─── Test 2: 单个 tool call — Read 文件 ─────────────────────────
+### 验证：GPT 能正确发出 Read tool call
+### 期望：content_block_start(tool_use, name="Read") → input_json_delta 片段 → stop_reason="tool_use"
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "stream": true,
+  "system": "You are a coding assistant. Use the tools available to help the user.",
+  "messages": [
+    { "role": "user", "content": "Read the file /tmp/hello.py and tell me what it does." }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem. The file_path parameter must be an absolute path.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "The absolute path to the file to read"
+          },
+          "offset": {
+            "type": "number",
+            "description": "The line number to start reading from"
+          },
+          "limit": {
+            "type": "number",
+            "description": "The number of lines to read"
+          }
+        },
+        "required": ["file_path"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "tool_choice": { "type": "auto" }
+}
+
+
+### ─── Test 3: 强制 tool call — tool_choice: any ──────────────────
+### 验证：tool_choice "any" → OpenAI "required"，GPT 必须调用工具
+### 期望：一定会收到 tool_use block，不会只返回文本
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "stream": true,
+  "system": "You are a coding assistant.",
+  "messages": [
+    { "role": "user", "content": "What files are in /tmp?" }
+  ],
+  "tools": [
+    {
+      "name": "Bash",
+      "description": "Executes a given bash command. The command will run in a shell environment.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The command to execute"
+          },
+          "description": {
+            "type": "string",
+            "description": "Clear description of what this command does"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Optional timeout in milliseconds"
+          }
+        },
+        "required": ["command"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "tool_choice": { "type": "any" }
+}
+
+
+### ─── Test 4: 强制指定工具 — tool_choice: tool ───────────────────
+### 验证：tool_choice { type: "tool", name: "Glob" } → GPT 必须调用 Glob
+### 期望：一定收到 name="Glob" 的 tool_use block
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "stream": true,
+  "system": "You are a coding assistant.",
+  "messages": [
+    { "role": "user", "content": "Find all TypeScript files in the project" }
+  ],
+  "tools": [
+    {
+      "name": "Glob",
+      "description": "Fast file pattern matching tool. Supports glob patterns like '**/*.ts'. Returns matching file paths.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "The glob pattern to match files against"
+          },
+          "path": {
+            "type": "string",
+            "description": "The directory to search in"
+          }
+        },
+        "required": ["pattern"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "tool_choice": { "type": "tool", "name": "Glob" }
+}
+
+
+### ─── Test 5: 文本 + tool call 混合响应 ──────────────────────────
+### 验证：GPT 先输出文本说明，再发 tool call
+### 期望：content_block_start(text) → text deltas → content_block_stop(text)
+###       → content_block_start(tool_use) → input_json_delta → stop_reason="tool_use"
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 2048,
+  "stream": true,
+  "system": "You are a coding assistant. Always explain what you're about to do before using a tool.",
+  "messages": [
+    { "role": "user", "content": "Check if the file /etc/hosts exists and show me its contents." }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "The absolute path to the file to read"
+          }
+        },
+        "required": ["file_path"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "Bash",
+      "description": "Executes a given bash command.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The command to execute"
+          }
+        },
+        "required": ["command"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "tool_choice": { "type": "auto" }
+}
+
+
+### ─── Test 6: 多工具场景 ─────────────────────────────────────────
+### 验证：给多个工具，GPT 选择合适的
+### 期望：GPT 应该选择 Grep（搜索内容）而不是 Glob（搜索文件名）
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 2048,
+  "stream": true,
+  "system": "You are a coding assistant. Use the most appropriate tool for each task.",
+  "messages": [
+    { "role": "user", "content": "Search for the word 'TODO' in all .ts files under /src" }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": { "type": "string" }
+        },
+        "required": ["file_path"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "Glob",
+      "description": "Fast file pattern matching tool. Returns matching file paths sorted by modification time.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string", "description": "Glob pattern like '**/*.ts'" },
+          "path": { "type": "string", "description": "Directory to search in" }
+        },
+        "required": ["pattern"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "Grep",
+      "description": "Searches file contents using regex patterns. Supports glob filtering and multiple output modes.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string", "description": "Regex pattern to search for" },
+          "path": { "type": "string", "description": "File or directory to search in" },
+          "glob": { "type": "string", "description": "Glob pattern to filter files, e.g. '*.ts'" }
+        },
+        "required": ["pattern"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "Bash",
+      "description": "Executes a bash command.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" }
+        },
+        "required": ["command"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "tool_choice": { "type": "auto" }
+}
+
+
+### ─── Test 7: 无 streaming (回退测试) ────────────────────────────
+### 验证：stream: false 时 proxy 应该怎样？
+### 注意：当前 iteration 4 的 proxy 强制 streaming，这个请求会收到 SSE 流
+###       而不是 JSON。这说明我们还没处理 non-streaming 回退（Iteration 6）。
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 200,
+  "stream": false,
+  "system": "Reply briefly.",
+  "messages": [
+    { "role": "user", "content": "Hello" }
+  ]
+}
