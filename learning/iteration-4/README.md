@@ -160,6 +160,22 @@ tool_use Read(file_b)           → block index 2
 
 所以我们需要为每个 tool call 记住它在 Anthropic 中的 block index，才能在发送 delta 时用对 index。
 
+### 为什么 tool call 不需要类似 `textBlockStarted` 的 flag？
+
+`textBlockStarted` 存在的唯一原因是 **OpenAI 的 text 流没有"首次"信号**——每个 chunk 都只是 `delta.content: "一段文字"`，第一个和第 N 个在结构上完全一样。我们必须自己用 boolean 记住"text block 是否已经 start 过了"。
+
+Tool call 则完全不同：OpenAI **协议本身就自带了结构化信号**：
+
+- **第一个 chunk**：携带 `tc.id`（如 `"call_abc123"`）和 `tc.function.name`
+- **后续 chunk**：只有 `tc.function.arguments` 片段，**没有 `tc.id`**
+
+所以代码中 `if (tc.id)` 这个判断天然就区分了"新 tool call 开始"和"已有 tool call 的后续参数"——不需要额外的 flag。
+
+| | 首次 chunk 的特征 | 需要自制 flag？ |
+|---|---|---|
+| **Text** | `delta.content: "hi"` — 跟后续完全一样 | 需要 `textBlockStarted` |
+| **Tool call** | `tc.id: "call_xxx"` — 后续没有 id | 不需要，`tc.id` 存在即首次 |
+
 ---
 
 ## 4. 翻译流程图
