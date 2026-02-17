@@ -297,3 +297,39 @@ Content-Type: application/json
     { "role": "user", "content": "Hello" }
   ]
 }
+
+### --- Test 8: parallel tool calls ────────────────────────────────
+### 验证：GPT 在一个回复中发出多个 tool calls（不同 index）
+### 期望：逐个 block 交错发送：start[0] → delta[0]... → start[1] → delta[1]... → start[2] → delta[2]...
+###       最后统一关闭：stop[0] → stop[1] → stop[2] → message_delta(stop_reason="tool_use")
+
+POST http://localhost:3456/v1/messages
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 2048,
+  "stream": true,
+  "system": "You are a coding assistant. When asked to read multiple files, read them ALL at once in parallel using separate tool calls. Do NOT read them one by one.",
+  "messages": [
+    { "role": "user", "content": "Read these three files for me: /etc/hosts, /etc/resolv.conf, and /etc/shells" }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Reads a file from the local filesystem. The file_path parameter must be an absolute path.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "The absolute path to the file to read"
+          }
+        },
+        "required": ["file_path"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "tool_choice": { "type": "auto" }
+}
