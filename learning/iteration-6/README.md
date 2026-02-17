@@ -142,20 +142,26 @@ POST /v1/messages/count_tokens
 
 ### 解决方案：估算
 
-我们无法精确计算 OpenAI 模型的 token 数。但可以做一个粗略估算：
+我们使用 [tiktoken](https://www.npmjs.com/package/tiktoken) 来精确计算 token 数：
 
 ```typescript
+import { get_encoding } from "tiktoken";
+
+// 启动时初始化一次，所有请求复用
+const tokenEncoder = get_encoding("o200k_base");
+
+// 在 count_tokens handler 中：
 if (req.method === "POST" && pathname === "/v1/messages/count_tokens") {
   const body = JSON.parse(await readBody(req));
-  // 粗略估算：JSON 长度 / 4 ≈ token 数（英文平均 4 字符一个 token）
-  const estimatedTokens = JSON.stringify(body.messages || []).length / 4;
+  const text = JSON.stringify(body.messages || []);
+  const estimatedTokens = tokenEncoder.encode(text).length;
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ input_tokens: Math.ceil(estimatedTokens) }));
   return;
 }
 ```
 
-为什么 `/ 4`？英文文本平均每 4 个字符约 1 个 token。这不精确，但足够让 Claude Code 做出合理的决策。
+`o200k_base` 是 GPT-4o / GPT-5 系列使用的 BPE encoding，比 `string.length / 4` 的粗估准确得多。
 
 ### 兜底
 

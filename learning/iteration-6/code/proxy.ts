@@ -14,6 +14,12 @@
  */
 
 import http from "node:http";
+import { get_encoding } from "tiktoken";
+
+// ─── Tokenizer ─────────────────────────────────────────────────
+// o200k_base is the encoding used by GPT-4o / GPT-5 family.
+// Initialize once at startup; reuse across all requests.
+const tokenEncoder = get_encoding("o200k_base");
 
 // ─── Config ─────────────────────────────────────────────────────
 const PORT = 3456;
@@ -512,8 +518,9 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     try {
       const parsed = JSON.parse(body);
-      // 粗略估算：JSON 字符数 / 4 ≈ token 数
-      const estimatedTokens = JSON.stringify(parsed.messages || []).length / 4;
+      // 用 tiktoken 精确计算 token 数
+      const text = JSON.stringify(parsed.messages || []);
+      const estimatedTokens = tokenEncoder.encode(text).length;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ input_tokens: Math.ceil(estimatedTokens) }));
     } catch {
