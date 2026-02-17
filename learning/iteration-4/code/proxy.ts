@@ -17,7 +17,7 @@ import http from "node:http";
 // ─── Config ─────────────────────────────────────────────────────
 const PORT = 3456;
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const TARGET_MODEL = "gpt-5-mini-2025-08-07";
+const TARGET_MODEL = "gpt-5.2";
 const SPOOF_MODEL = "claude-sonnet-4-5-20250929";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
@@ -64,6 +64,14 @@ interface StreamState {
   blockIndex: number;
   textBlockStarted: boolean;
   activeToolCalls: Map<number, TrackedToolCall>; // OpenAI tool index → tracked info
+}
+
+// ─── Token Parameter Compatibility ──────────────────────────────
+// OpenAI 前沿模型 (GPT-5.x, o-series) 拒绝旧版 max_tokens，
+// 要求使用 max_completion_tokens。详见 provider-routing-guide。
+
+function needsMaxCompletionTokens(model: string): boolean {
+  return /^(gpt-5|o[1-9])/.test(model);
 }
 
 // ─── SSE Helper ─────────────────────────────────────────────────
@@ -348,10 +356,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     // 构造 OpenAI 请求（新增 tools + tool_choice）
+    const maxTokens = Math.min(body.max_tokens || 4096, 16384);
     const openaiReq: Record<string, unknown> = {
       model: TARGET_MODEL,
       messages: openaiMessages,
-      max_tokens: Math.min(body.max_tokens || 4096, 16384),
+      // 前沿模型用 max_completion_tokens，旧模型用 max_tokens
+      ...(needsMaxCompletionTokens(TARGET_MODEL)
+        ? { max_completion_tokens: maxTokens }
+        : { max_tokens: maxTokens }),
       stream: true,
       stream_options: { include_usage: true },
     };
