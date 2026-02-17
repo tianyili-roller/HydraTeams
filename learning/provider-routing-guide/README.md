@@ -105,22 +105,11 @@ The Responses API translator (`request-responses.ts`) **never sends `max_tokens`
 
 ---
 
-## 4. Gotcha #2 — Model Name Aliases Don't Work for Frontier Models
+## 4. Note on Model Names — Short Aliases Work Fine
 
-### The Problem
+Short model names like `gpt-5.2` or `gpt-5-mini` work correctly — no need to specify the full versioned name (e.g. `gpt-5.2-2025-12-11`). OpenAI resolves these aliases on their end.
 
-Short model aliases like `gpt-5.2` or `gpt-5-mini` silently **fall back to `gpt-4o`** on the OpenAI API. You must use the full versioned name:
-
-| What you type | What actually runs |
-|---------------|-------------------|
-| `gpt-5.2` | `gpt-4o` (silent fallback!) |
-| `gpt-5.2-2025-12-11` | `gpt-5.2-2025-12-11` (correct) |
-| `gpt-5-mini` | `gpt-4o` (silent fallback!) |
-| `gpt-5-mini-2025-08-07` | `gpt-5-mini-2025-08-07` (correct) |
-
-### Why
-
-This is an **OpenAI-side alias resolution issue**, not a proxy bug. The proxy just passes `config.targetModel` straight through to the API — no name resolution or validation happens in our code:
+The proxy passes `config.targetModel` straight through to the API with no name resolution:
 
 ```typescript
 // Both paths pass model name as-is:
@@ -131,9 +120,7 @@ model: targetModel,
 model: targetModel,
 ```
 
-### Affects Both Providers
-
-Unlike the `max_tokens` issue, this affects **both** `--provider openai` and `--provider chatgpt`. Always use fully-qualified model names.
+Either short or full names work on both providers.
 
 ---
 
@@ -142,7 +129,7 @@ Unlike the `max_tokens` issue, this affects **both** `--provider openai` and `--
 | Issue | `--provider openai` (Chat Completions) | `--provider chatgpt` (Responses API) |
 |-------|---------------------------------------|--------------------------------------|
 | `max_tokens` rejected by frontier models | **Affected** | Not affected (param not sent) |
-| Short model name → silent fallback | **Affected** | **Affected** |
+| Model name aliases (e.g. `gpt-5-mini`) | Work fine | Work fine |
 
 ---
 

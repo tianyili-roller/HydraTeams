@@ -107,22 +107,11 @@ Responses API 翻译器（`request-responses.ts`）**根本不发送 `max_tokens
 
 ---
 
-## 4. 坑点 #2 — 前沿模型的短名称会静默降级
+## 4. 关于模型名称——短名称可以正常使用
 
-### 问题
+短模型名称（如 `gpt-5.2` 或 `gpt-5-mini`）可以正常使用，无需指定完整版本号（如 `gpt-5.2-2025-12-11`）。OpenAI 会在其侧自动解析别名。
 
-短模型名称（如 `gpt-5.2` 或 `gpt-5-mini`）在 OpenAI API 上会**静默回退到 `gpt-4o`**。必须使用完整的版本号名称：
-
-| 输入的名称 | 实际运行的模型 |
-|-----------|--------------|
-| `gpt-5.2` | `gpt-4o`（静默降级！） |
-| `gpt-5.2-2025-12-11` | `gpt-5.2-2025-12-11`（正确） |
-| `gpt-5-mini` | `gpt-4o`（静默降级！） |
-| `gpt-5-mini-2025-08-07` | `gpt-5-mini-2025-08-07`（正确） |
-
-### 原因
-
-这是 **OpenAI 侧的别名解析问题**，不是 proxy 的 bug。Proxy 只是把 `config.targetModel` 原样传递给 API，不做任何名称解析或校验：
+Proxy 将 `config.targetModel` 原样传递给 API，不做任何名称解析：
 
 ```typescript
 // 两条路径都原样传递模型名：
@@ -133,9 +122,7 @@ model: targetModel,
 model: targetModel,
 ```
 
-### 两种 Provider 都受影响
-
-与 `max_tokens` 问题不同，模型名称问题**同时影响** `--provider openai` 和 `--provider chatgpt`。务必使用完整的模型名称。
+短名称和完整名称在两种 provider 上都能正常工作。
 
 ---
 
@@ -144,7 +131,7 @@ model: targetModel,
 | 问题 | `--provider openai`（Chat Completions） | `--provider chatgpt`（Responses API） |
 |------|---------------------------------------|--------------------------------------|
 | `max_tokens` 被前沿模型拒绝 | **受影响** | 不受影响（未发送该参数） |
-| 短模型名 → 静默降级 | **受影响** | **受影响** |
+| 模型名别名（如 `gpt-5-mini`） | 正常工作 | 正常工作 |
 
 ---
 
