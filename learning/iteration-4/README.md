@@ -240,6 +240,87 @@ if (tc.id) {
 }
 ```
 
+### 完整 SSE 报文对照（text + tool call 混合场景）
+
+上面的流程图是抽象的，下面展示你在 wire 上**实际看到的**完整 SSE 报文。
+
+场景：GPT 先说 "Let me read it."，然后调用 `Read({ file_path: "/tmp/x" })`。
+
+**OpenAI 发来的 SSE 流（proxy 的输入）：**
+
+```
+data: {"choices":[{"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"content":"Let me"},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"content":" read it."},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"Read","arguments":""}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"fi"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"le_pa"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"/tmp/x\"}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":42,"completion_tokens":18}}
+
+data: [DONE]
+```
+
+注意几点：
+- 第一个 chunk 有 `role: "assistant"` 和空 `content: ""`，但这**不能**用来开启 text block（因为不确定后面是 text 还是 tool call，且 `""` 是 falsy）
+- tool call 首个 chunk 有 `id` 和 `name`，后续 chunk 只有 `arguments` 片段
+- `finish_reason: "tool_calls"`（注意是复数）表示本轮回复包含工具调用
+
+**Proxy 翻译后发给 Claude Code 的 SSE 流（proxy 的输出）：**
+
+```
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":0,"output_tokens":0}}}
+
+event: content_block_start                                          ← "Let me" 到达，懒初始化 text block
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Let me"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" read it."}}
+
+event: content_block_stop                                           ← tool call 来了，先关 text block
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start                                          ← 开启 tool_use block
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_abc","name":"Read"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"fi"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"le_pa"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"th\":\"/tmp/x\"}"}}
+
+event: content_block_stop                                           ← finish_reason 到达，关闭 tool block
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta                                                ← "tool_calls" → "tool_use"
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":0,"output_tokens":18}}
+
+event: message_stop
+data: {"type":"message_stop"}
+```
+
+对照要点：
+1. **OpenAI 的第一个 `role` chunk** → proxy 不产生任何输出（等真正有内容再说）
+2. **首个有内容的 text chunk** → `content_block_start(text)` + `content_block_delta`
+3. **tool call 的 `id` chunk** → 先 `content_block_stop`(text)，再 `content_block_start`(tool_use)
+4. **tool call 的 `arguments` chunks** → `content_block_delta`(input_json_delta)
+5. **`finish_reason: "tool_calls"`** → `content_block_stop` + `message_delta(stop_reason: "tool_use")`
+6. **`[DONE]`** → `message_stop`
+
 ---
 
 ## 5. 对照生产代码
