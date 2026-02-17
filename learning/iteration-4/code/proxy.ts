@@ -17,7 +17,7 @@ import http from "node:http";
 // ─── Config ─────────────────────────────────────────────────────
 const PORT = 3456;
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const TARGET_MODEL = "gpt-4o";
+const TARGET_MODEL = "gpt-5-mini-2025-08-07";
 const SPOOF_MODEL = "claude-sonnet-4-5-20250929";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
@@ -45,7 +45,11 @@ type AnthropicToolChoice =
 /** OpenAI function tool definition */
 interface OpenAITool {
   type: "function";
-  function: { name: string; description: string; parameters: Record<string, unknown> };
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
 }
 
 /** 跟踪一个活跃的 tool call */
@@ -100,10 +104,14 @@ function translateToolChoice(
 ): string | { type: "function"; function: { name: string } } | undefined {
   if (!choice) return undefined;
   switch (choice.type) {
-    case "auto": return "auto";
-    case "any":  return "required";
-    case "tool": return { type: "function", function: { name: choice.name } };
-    case "none": return "none";
+    case "auto":
+      return "auto";
+    case "any":
+      return "required";
+    case "tool":
+      return { type: "function", function: { name: choice.name } };
+    case "none":
+      return "none";
   }
 }
 
@@ -282,11 +290,12 @@ async function translateStream(
           }
 
           // stop_reason 翻译
-          const stopReason = choice.finish_reason === "tool_calls"
-            ? "tool_use"      // ← GPT 调用了工具
-            : choice.finish_reason === "length"
-              ? "max_tokens"
-              : "end_turn";
+          const stopReason =
+            choice.finish_reason === "tool_calls"
+              ? "tool_use" // ← GPT 调用了工具
+              : choice.finish_reason === "length"
+                ? "max_tokens"
+                : "end_turn";
 
           sendSSE(res, "message_delta", {
             type: "message_delta",
@@ -321,18 +330,20 @@ const server = http.createServer(async (req, res) => {
     const openaiMessages: Array<{ role: string; content: string }> = [];
 
     if (body.system) {
-      const text = typeof body.system === "string"
-        ? body.system
-        : body.system.map((b: { text: string }) => b.text).join("\n");
+      const text =
+        typeof body.system === "string"
+          ? body.system
+          : body.system.map((b: { text: string }) => b.text).join("\n");
       openaiMessages.push({ role: "system", content: text });
     }
 
     for (const msg of body.messages) {
       openaiMessages.push({
         role: msg.role,
-        content: typeof msg.content === "string"
-          ? msg.content
-          : msg.content.map((b: { text?: string }) => b.text || "").join(""),
+        content:
+          typeof msg.content === "string"
+            ? msg.content
+            : msg.content.map((b: { text?: string }) => b.text || "").join(""),
       });
     }
 
@@ -348,7 +359,9 @@ const server = http.createServer(async (req, res) => {
     // ── 新增：翻译 tools ──
     if (body.tools && body.tools.length > 0) {
       openaiReq.tools = body.tools.map(translateToolDef);
-      console.log(`  Tools: ${body.tools.map((t: AnthropicTool) => t.name).join(", ")}`);
+      console.log(
+        `  Tools: ${body.tools.map((t: AnthropicTool) => t.name).join(", ")}`,
+      );
     }
 
     // ── 新增：翻译 tool_choice ──
@@ -357,47 +370,65 @@ const server = http.createServer(async (req, res) => {
       openaiReq.tool_choice = toolChoice;
     }
 
-    console.log(`→ ${body.model} → ${TARGET_MODEL} (${body.messages.length} msgs, ${body.tools?.length || 0} tools)`);
+    console.log(
+      `→ ${body.model} → ${TARGET_MODEL} (${body.messages.length} msgs, ${body.tools?.length || 0} tools)`,
+    );
 
     // ── 发给 OpenAI ──
     const upstream = await fetch(OPENAI_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify(openaiReq),
     });
 
     if (!upstream.ok) {
       const errText = await upstream.text();
-      console.error(`← OpenAI error ${upstream.status}: ${errText.slice(0, 200)}`);
+      console.error(
+        `← OpenAI error ${upstream.status}: ${errText.slice(0, 200)}`,
+      );
       res.writeHead(upstream.status, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: errText } }));
+      res.end(
+        JSON.stringify({
+          type: "error",
+          error: { type: "api_error", message: errText },
+        }),
+      );
       return;
     }
 
     if (!upstream.body) {
       res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "No body" } }));
+      res.end(
+        JSON.stringify({
+          type: "error",
+          error: { type: "api_error", message: "No body" },
+        }),
+      );
       return;
     }
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
+      Connection: "keep-alive",
     });
 
     await translateStream(upstream.body, res);
     console.log(`← Stream complete`);
-
   } catch (err) {
     console.error("Proxy error:", err);
     if (!res.headersSent) {
       res.writeHead(500, { "Content-Type": "application/json" });
     }
-    res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: String(err) } }));
+    res.end(
+      JSON.stringify({
+        type: "error",
+        error: { type: "api_error", message: String(err) },
+      }),
+    );
   }
 });
 
